@@ -17,122 +17,138 @@ our $VERSION = '1.2';
 
 sub CreateTopic
 {
-	my ($self, $name) = @_;
+    my ($self, $name) = @_;
 
-	my $r = $self->dispatch({
-		'Action'	=> 'CreateTopic',
-		'Name'		=> $name,
-	});
+    my $r = $self->dispatch({
+        'Action'    => 'CreateTopic',
+        'Name'        => $name,
+    });
 
-	my $arn = eval { $r->{'CreateTopicResult'}{'TopicArn'} };
+    my $arn = eval { $r->{'CreateTopicResult'}{'TopicArn'} };
 
-	return defined $arn ? $self->GetTopic($arn) : undef;
+    return defined $arn ? $self->GetTopic($arn) : undef;
 }
 
 sub GetTopic
 {
-	my ($self, $arn) = @_;
+    my ($self, $arn) = @_;
 
-	return Amazon::SNS::Topic->new({
-		'sns' => $self,
-		'arn' => $arn,
-	});
+    return Amazon::SNS::Topic->new({
+        'sns' => $self,
+        'arn' => $arn,
+    });
 }
 
 sub DeleteTopic
 {
-	my ($self, $arn) = @_;
+    my ($self, $arn) = @_;
 
-	return $self->dispatch({
-		'Action'	=> 'DeleteTopic',
-		'TopicArn'	=> $arn,
-	});
+    return $self->dispatch({
+        'Action'    => 'DeleteTopic',
+        'TopicArn'    => $arn,
+    });
 }
 
 sub ListTopics
 {
-	my ($self, $name) = @_;
+    my ($self, $name) = @_;
 
-	my $r = $self->dispatch({
-		'Action'	=> 'ListTopics',
-	});
+    my $r = $self->dispatch({
+        'Action'    => 'ListTopics',
+    });
 
-	return map {
+    return map {
 
-		Amazon::SNS::Topic->new({
-			'sns' => $self,
-			'arn' => $_->{'TopicArn'},
-		})
+        Amazon::SNS::Topic->new({
+            'sns' => $self,
+            'arn' => $_->{'TopicArn'},
+        })
 
-	} @{$r->{'ListTopicsResult'}{'Topics'}[0]{'member'}};
+    } @{$r->{'ListTopicsResult'}{'Topics'}[0]{'member'}};
 }
 
+sub ListPlatformApplications
+{
+    my ($self, $token) = @_;
+
+    my $r = $self->dispatch({
+        'Action'    => 'ListPlatformApplications',
+    });
+
+    return map {
+
+        Amazon::SNS::PlatformApplication->new({
+            'sns' => $self,
+            'arn' => $_->{'PlatformApplicationArn'},
+        })
+
+    } @{$r->{'ListPlatformApplicationsResult'}{'PlatformApplications'}{'member'}};
+}
 
 sub dispatch
 {
-	my ($self, $args) = @_;
+    my ($self, $args) = @_;
 
-	$self->error(undef);
+    $self->error(undef);
 
-	$self->service('http://sns.eu-west-1.amazonaws.com')
-		unless defined $self->service;
+    $self->service('http://sns.eu-west-1.amazonaws.com')
+        unless defined $self->service;
 
-	# sanitize args
-	do { delete $args->{$_} unless defined $args->{$_} } for (keys %$args);
+    # sanitize args
+    do { delete $args->{$_} unless defined $args->{$_} } for (keys %$args);
 
-	# add signature elements
-	$args->{'Timestamp'} = $self->timestamp;
-	$args->{'AWSAccessKeyId'} = $self->key;
-	$args->{'SignatureVersion'} = 2;
-	$args->{'SignatureMethod'} = 'HmacSHA256';
+    # add signature elements
+    $args->{'Timestamp'} = $self->timestamp;
+    $args->{'AWSAccessKeyId'} = $self->key;
+    $args->{'SignatureVersion'} = 2;
+    $args->{'SignatureMethod'} = 'HmacSHA256';
 
-	# build URI
-	my $uri = URI->new($self->service);
+    # build URI
+    my $uri = URI->new($self->service);
 
-	$uri->path('/');
-	$uri->query(join('&', map { $_ . '=' . URI::Escape::uri_escape_utf8($args->{$_}, '^A-Za-z0-9\-_.~') } sort keys %$args ));
+    $uri->path('/');
+    $uri->query(join('&', map { $_ . '=' . URI::Escape::uri_escape_utf8($args->{$_}, '^A-Za-z0-9\-_.~') } sort keys %$args ));
 
-	# create signature
-	$args->{'Signature'} = hmac_sha256_base64(join("\n", 'POST', $uri->host, $uri->path, $uri->query), $self->secret);
+    # create signature
+    $args->{'Signature'} = hmac_sha256_base64(join("\n", 'POST', $uri->host, $uri->path, $uri->query), $self->secret);
 
-	# padding
-	while (length($args->{'Signature'}) % 4) {
-		$args->{'Signature'} .= '=';
-	}
+    # padding
+    while (length($args->{'Signature'}) % 4) {
+        $args->{'Signature'} .= '=';
+    }
 
-	# rewrite query string
-	$uri->query(join('&', map { $_ . '=' . URI::Escape::uri_escape_utf8($args->{$_}, '^A-Za-z0-9\-_.~') } sort keys %$args ));
+    # rewrite query string
+    $uri->query(join('&', map { $_ . '=' . URI::Escape::uri_escape_utf8($args->{$_}, '^A-Za-z0-9\-_.~') } sort keys %$args ));
 
-	my $response = LWP::UserAgent->new->post($self->service, 'Content' => $uri->query);
+    my $response = LWP::UserAgent->new->post($self->service, 'Content' => $uri->query);
 
-	$self->status_code = $response->code;
+    $self->status_code($response->code);
 
         if ($response->is_success) {
-		return XMLin($response->content,
-				'SuppressEmpty' => 1,
-#				'KeyAttr' => { },
-				'ForceArray' => [ qw/ Topics member / ],
-		);
+        return XMLin($response->content,
+                'SuppressEmpty' => 1,
+                'ForceArray' => [ qw/ Topics member / ],
+        );
         } else {
-		print $response->content, "\n";
-		$self->error(
-			($response->content =~ /^<.+>/)
-				? eval { XMLin($response->content)->{'Error'}{'Message'} || $response->status_line }
-				: $response->status_line
-		);
+        print $response->content, "\n";
+        $self->error(
+            ($response->content =~ /^<.+>/)
+                ? eval { XMLin($response->content)->{'Error'}{'Message'} || $response->status_line }
+                : $response->status_line
+        );
         }
 
-	print STDERR 'ERROR: ', $self->error, "\n"
-		if $self->debug;
+    print STDERR 'ERROR: ', $self->error, "\n"
+        if $self->debug;
 
-	return undef;
+    return undef;
 }
 
 sub timestamp {
 
-	return sprintf("%04d-%02d-%02dT%02d:%02d:%02d.000Z", sub {
-		($_[5]+1900, $_[4]+1, $_[3], $_[2], $_[1], $_[0])
-	}->(gmtime(time)));
+    return sprintf("%04d-%02d-%02dT%02d:%02d:%02d.000Z", sub {
+        ($_[5]+1900, $_[4]+1, $_[3], $_[2], $_[1], $_[0])
+    }->(gmtime(time)));
 }
 
 
@@ -151,38 +167,175 @@ __PACKAGE__->mk_accessors(qw/ sns arn /);
 
 sub Publish
 {
-	my ($self, $msg, $subj) = @_;
+    my ($self, $msg, $subj) = @_;
 
-	# XXX croak on invalid arn
+    # XXX croak on invalid arn
 
-	my $structure = undef;
+    my $structure = undef;
 
-	# support JSON payload
-	if (ref($msg) eq 'HASH') {
+    # support JSON payload
+    if (ref($msg) eq 'HASH') {
 
-		$structure = 'json';
-		$msg = encode_json($msg);
-	}
+        $structure = 'json';
+        $msg = encode_json($msg);
+    }
 
 
-	my $r = $self->sns->dispatch({
-		'Action'		=> 'Publish',
-		'TopicArn'		=> $self->arn,
-		'Message'		=> $msg,
-		'MessageStructure'	=> $structure,
-		'Subject'		=> $subj,
-	});
+    my $r = $self->sns->dispatch({
+        'Action'        => 'Publish',
+        'TopicArn'        => $self->arn,
+        'Message'        => $msg,
+        'MessageStructure'    => $structure,
+        'Subject'        => $subj,
+    });
 
-	# return message id on success, undef on error
-	return $r ? $r->{'PublishResult'}{'MessageId'} : undef;
+    # return message id on success, undef on error
+    return $r ? $r->{'PublishResult'}{'MessageId'} : undef;
 }
 
 sub DeleteTopic
 {
-	my ($self) = @_;
+    my ($self) = @_;
 
-	return $self->sns->DeleteTopic($self->arn);
+    return $self->sns->DeleteTopic($self->arn);
 }
+
+1;
+
+
+package Amazon::SNS::PlatformApplication;
+
+use strict;
+use warnings;
+
+use base qw(Class::Accessor);
+
+use JSON;
+
+__PACKAGE__->mk_accessors(qw/ sns arn /);
+
+sub CreatePlatformEndpoint
+{
+    my ($self, $args) = @_;
+
+    my $r = $self->sns->dispatch({
+        'Action'                    => 'CreatePlatformEndpoint',
+        'PlatformApplicationArn'    => $self->arn,
+        'CustomUserData'            => $args->{CustomUserData},
+        'Token'                     => $args->{Token}
+    });
+
+    my $arn = eval { $r->{'CreatePlatformEndpointResult'}{'EndpointArn'} };
+
+    return defined $arn ? $self->GetEndpoint($arn) : undef;
+}
+
+sub DeleteEndpoint
+{
+    my ($self, $arn) = @_;
+
+    return $self->sns->dispatch({
+        'Action'      => 'DeleteEndpoint',
+        'EndpintArn'  => $arn,
+    });
+}
+
+sub SetEndpointAttributes
+{
+    my ($self, $arn, $args) = @_;
+    my %attributes;
+    my $count = 1;
+    for (keys %$args) {
+        my $key = $_;
+        my $value = $args->{$_};
+        $attributes{"Attributes.entry.$count.key"} = $key;
+        $attributes{"Attributes.entry.$count.value"} = $value;
+        $count++;
+    }
+    return $self->sns->dispatch({
+        'Action'      => 'SetEndpointAttributes',
+        'EndpointArn'  => $arn,
+        %attributes
+    });
+}
+
+sub GetEndpoint
+{
+    my ($self, $arn) = @_;
+
+    return Amazon::SNS::Endpoint->new({
+        'sns' => $self->sns,
+        'arn' => $arn,
+    });
+}
+
+sub ListEndpointsByPlatformApplication
+{
+    my ($self, $token) = @_;
+
+    my $r = $self->sns->dispatch({
+        'Action'                    => 'ListEndpointsByPlatformApplication',
+        'PlatformApplicationArn'    => $self->arn,
+    });
+
+    return map {
+        Amazon::SNS::Endpoint->new({
+            'sns' => $self->sns,
+            'arn' => $_->{'EndpointArn'},
+        })
+
+    } @{$r->{'ListEndpointsByPlatformApplicationResult'}{'Endpoints'}{'member'}};
+}
+
+1;
+
+
+package Amazon::SNS::Endpoint;
+
+use strict;
+use warnings;
+
+use base qw(Class::Accessor);
+
+use JSON;
+
+__PACKAGE__->mk_accessors(qw/ sns arn /);
+
+sub Publish
+{
+    my ($self, $msg, $subj) = @_;
+
+    my $structure = undef;
+
+    # support JSON payload
+    if (ref($msg) eq 'HASH') {
+
+        $structure = 'json';
+        $msg = encode_json($msg);
+    }
+
+
+    my $r = $self->sns->dispatch({
+        'Action'            => 'Publish',
+        'TargetArn'         => $self->arn,
+        'Message'           => $msg,
+        'MessageStructure'  => $structure,
+    });
+
+    # return message id on success, undef on error
+    return $r ? $r->{'PublishResult'}{'MessageId'} : undef;
+}
+
+sub Delete
+{
+    my ($self, $arn) = @_;
+
+    return $self->sns->dispatch({
+        'Action'      => 'DeleteEndpoint',
+        'EndpintArn'  => $self->arn,
+    });
+}
+
 
 1;
 
@@ -200,7 +353,7 @@ Amazon::SNS - Amazon Simple Notification Service made simpler
   # create a new topic and publish
 
   my $topic = $sns->CreateTopic('MyTopic')
-	or die $sns->error;
+    or die $sns->error;
 
   $topic->Publish('My test message');
 
@@ -239,32 +392,32 @@ Sorry for not providing a better documentation, patches are always accepted. ;)
 
 =item Amazon::SNS->new({ 'key' => '...', 'secret' => '...' })
 
-	Creates an Amazon::SNS object with given key and secret.
+    Creates an Amazon::SNS object with given key and secret.
 
 =item $sns->GetTopic($arn)
 
-	Gives you an Amazon::SNS::Topic object using an existing ARN.
+    Gives you an Amazon::SNS::Topic object using an existing ARN.
 
 =item $sns->CreateTopic($name)
 
-	Gives you an Amazon::SNS::Topic object with the given name, creating it 
-	if it does not already exist in your Amazon SNS account.
-	
+    Gives you an Amazon::SNS::Topic object with the given name, creating it 
+    if it does not already exist in your Amazon SNS account.
+    
 =item $sns->DeleteTopic($arn)
 
-	Deletes a topic using its ARN.
+    Deletes a topic using its ARN.
 
 =item $sns->ListTopics
 
-	The result is a list of all the topics in your account, as an array of Amazon::SNS::Topic objects.
+    The result is a list of all the topics in your account, as an array of Amazon::SNS::Topic objects.
 
 =item $sns->error
 
-	Description of the last error, or undef if none.
+    Description of the last error, or undef if none.
 
 =item $sns->status_code
 
-	The status code of the last HTTP response.
+    The status code of the last HTTP response.
 
 =back
 
@@ -276,25 +429,25 @@ Sorry for not providing a better documentation, patches are always accepted. ;)
 
 =item $sns->service($service_url)
 
-	Get/set SNS service url, something like 'http://sns.us-east-1.amazonaws.com'.
+    Get/set SNS service url, something like 'http://sns.us-east-1.amazonaws.com'.
 
 =item $sns->key
 
 =item $sns->key('...')
 
-	Get/set auth key.
+    Get/set auth key.
 
 =item $sns->secret
 
 =item $sns->secret('...')
 
-	Get/set secret.
-	
+    Get/set secret.
+    
 =item $sns->debug
 
 =item $sns->debug(1)
 
-	Get/set debug level. When set to 1 you'll get some debug output on STDERR.
+    Get/set debug level. When set to 1 you'll get some debug output on STDERR.
 
 =back
 
