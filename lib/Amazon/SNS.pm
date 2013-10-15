@@ -67,6 +67,16 @@ sub ListTopics
     } @{$r->{'ListTopicsResult'}{'Topics'}[0]{'member'}};
 }
 
+sub GetPlatformApplication
+{
+    my ($self, $arn) = @_;
+
+    return Amazon::SNS::PlatformApplication->new({
+        'sns' => $self,
+        'arn' => $arn,
+    });
+}
+
 sub ListPlatformApplications
 {
     my ($self, $token) = @_;
@@ -377,7 +387,7 @@ Amazon::SNS - Amazon Simple Notification Service made simpler
   print $_->arn, "\n" for @topics;
 
 
- 
+
   # change region
 
   $sns->service('http://sns.us-east-1.amazonaws.com');
